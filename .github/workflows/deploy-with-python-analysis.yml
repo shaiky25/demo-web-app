@@ -76,40 +76,27 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.repos.createCommitComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: '🤖 Deployment analysis completed. Check the workflow logs for details.'
-            })
-
-      - name: Post Detailed Results
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
             const fs = require('fs');
             let report = '';
             try {
               report = fs.readFileSync('agent-python/analysis-report.txt', 'utf8');
             } catch (e) {
-              report = 'Could not read analysis report: ' + e.message;
+              report = 'Could not read analysis report';
             }
             
             const hasIssues = report.includes('ISSUES_DETECTED') || report.includes('Missing critical elements');
-            const status = hasIssues ? '⚠️ **WARNING: Breaking changes detected!**' : '✅ **No issues detected**';
+            const status = hasIssues ? 'WARNING: Breaking changes detected' : 'No issues detected';
             
             const body = `## 🤖 Deployment Analysis Report
             
 **Status:** ${status}
 **Deployment URL:** ${{ needs.deploy.outputs.deployment_url }}
-**Commit:** ${{ github.sha }}
 
 <details>
-<summary>📋 Click to view full analysis</summary>
+<summary>Click to view full analysis</summary>
 
 \`\`\`
-${report.substring(0, 4000)}
+${report.substring(0, 3000)}
 \`\`\`
 
 </details>
