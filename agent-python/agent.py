@@ -288,10 +288,48 @@ if __name__ == '__main__':
     print('🤖 Deployment Analyzer Agent Starting...\n')
     print(f'Analyzing deployment at: {deployment_url}\n')
     
-    run_agent(
-        f"Analyze the deployment at {deployment_url} and identify any breaking changes or issues "
-        f"that would prevent the counter functionality from working. Check for missing elements, "
-        f"broken scripts, or other problems."
-    )
+    # Capture output for report
+    import sys
+    from io import StringIO
     
-    print('\n📊 Analysis Complete!\n')
+    # Save original stdout
+    original_stdout = sys.stdout
+    report_buffer = StringIO()
+    
+    # Redirect stdout to capture output
+    sys.stdout = report_buffer
+    
+    try:
+        run_agent(
+            f"Analyze the deployment at {deployment_url} and identify any breaking changes or issues "
+            f"that would prevent the counter functionality from working. Check for missing elements, "
+            f"broken scripts, or other problems."
+        )
+    finally:
+        # Restore stdout
+        sys.stdout = original_stdout
+        
+        # Get the report
+        report = report_buffer.getvalue()
+        
+        # Print to console
+        print(report)
+        
+        # Save to file
+        with open('analysis-report.txt', 'w') as f:
+            f.write(f'Deployment Analysis Report\n')
+            f.write(f'=' * 50 + '\n')
+            f.write(f'URL: {deployment_url}\n')
+            f.write(f'Timestamp: {requests.utils.default_headers()["User-Agent"]}\n')
+            f.write(f'=' * 50 + '\n\n')
+            f.write(report)
+        
+        print('\n📊 Analysis Complete!\n')
+        print('📄 Report saved to: analysis-report.txt\n')
+        
+        # Check if there are breaking changes and exit with error code
+        if 'ISSUES_DETECTED' in report or 'Missing critical elements' in report:
+            print('⚠️  WARNING: Breaking changes detected!')
+            print('Review the analysis above for details.\n')
+            # Uncomment the line below to fail the CI/CD pipeline on breaking changes
+            # sys.exit(1)
