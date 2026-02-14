@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+from baseline import compare_with_baseline, load_baseline
+
 # Tool implementations
 def check_deployed_site(url: str) -> str:
     """Fetches the deployed website and analyzes its HTML structure, scripts, and styles"""
@@ -212,11 +214,19 @@ def run_agent(user_message: str):
 4. Compare deployments to detect regressions
 5. Provide clear, actionable feedback about deployment health
 
+CRITICAL: For this counter app, you MUST verify these elements exist:
+- Button with id="increment" (REQUIRED)
+- Button with id="decrement" (REQUIRED)
+- Button with id="reset" (REQUIRED)
+- Element with id="count" (REQUIRED)
+- JavaScript file (app.js) must be loading
+- CSS file (style.css) must be loading
+
 When analyzing a deployment:
-- Always check for critical interactive elements (buttons, forms, etc.)
+- ALWAYS use the compare_deployments tool to check for all critical IDs
+- ALWAYS check for the increment, decrement, and reset buttons
 - Verify JavaScript and CSS files are loading
-- Look for missing IDs that are required for functionality
-- Report both breaking changes and warnings
+- Report ANY missing critical elements as BREAKING CHANGES
 - Be specific about what's broken and how it impacts users"""
     
     max_iterations = 10
@@ -326,10 +336,10 @@ if __name__ == '__main__':
         
         print('\n📊 Analysis Complete!\n')
         print('📄 Report saved to: analysis-report.txt\n')
-        
-        # Check if there are breaking changes and exit with error code
-        if 'ISSUES_DETECTED' in report or 'Missing critical elements' in report:
-            print('⚠️  WARNING: Breaking changes detected!')
-            print('Review the analysis above for details.\n')
-            # Uncomment the line below to fail the CI/CD pipeline on breaking changes
-            # sys.exit(1)
+    
+    # Check if there are breaking changes and exit with error code (OUTSIDE finally block)
+    if 'ISSUES_DETECTED' in report or 'Missing' in report or 'missing' in report.lower():
+        print('⚠️  WARNING: Breaking changes detected!')
+        print('Review the analysis above for details.\n')
+        # Exit with error code to fail the CI/CD pipeline
+        sys.exit(1)

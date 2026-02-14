@@ -1,0 +1,40 @@
+{
+  "url": "https://shaiky25.github.io/demo-web-app/",
+  "timestamp": "2026-02-14T12:39:19.053515",
+  "structure": {
+    "title": "Simple Web App",
+    "scripts": [
+      "app.js"
+    ],
+    "stylesheets": [
+      "style.css"
+    ],
+    "buttons": [
+      {
+        "id": "decrement",
+        "text": "Decrement",
+        "classes": []
+      },
+      {
+        "id": "reset",
+        "text": "Reset",
+        "classes": []
+      }
+    ],
+    "inputs": [],
+    "critical_ids": [
+      "count",
+      "decrement",
+      "reset"
+    ],
+    "element_counts": {
+      "buttons": 2,
+      "inputs": 0,
+      "forms": 0,
+      "links": 0,
+      "images": 0,
+      "scripts": 1,
+      "styles": 1
+    }
+  }
+}
