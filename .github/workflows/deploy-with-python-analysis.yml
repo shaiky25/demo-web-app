@@ -90,21 +90,16 @@ jobs:
             const deployUrl = '${{ needs.deploy.outputs.deployment_url }}';
             const commitSha = '${{ github.sha }}';
             
-            const body = `## 🤖 Deployment Analysis Report
-
-**Status:** ${emoji} ${statusText}
-**Deployment URL:** ${deployUrl}
-**Commit:** ${commitSha}
-
-<details>
-<summary>📋 Click to view full analysis</summary>
-
-\`\`\`
-${report.substring(0, 3000)}
-\`\`\`
-
-</details>
-`;
+            const body = '## 🤖 Deployment Analysis Report\n\n' +
+              'Status: ' + emoji + ' ' + statusText + '\n' +
+              'Deployment URL: ' + deployUrl + '\n' +
+              'Commit: ' + commitSha + '\n\n' +
+              '<details>\n' +
+              '<summary>📋 Click to view full analysis</summary>\n\n' +
+              '```\n' +
+              report.substring(0, 3000) + '\n' +
+              '```\n\n' +
+              '</details>';
             
             await github.rest.repos.createCommitComment({
               owner: context.repo.owner,
