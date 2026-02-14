@@ -7,7 +7,6 @@ on:
       - master
   workflow_dispatch:
 
-# Prevent multiple deployments from running at the same time
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -77,23 +76,28 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            let report = '';
+            let report = 'Analysis report not available';
             try {
               report = fs.readFileSync('agent-python/analysis-report.txt', 'utf8');
             } catch (e) {
-              report = 'Could not read analysis report';
+              console.log('Could not read report:', e.message);
             }
             
             const hasIssues = report.includes('ISSUES_DETECTED') || report.includes('Missing critical elements');
-            const status = hasIssues ? 'WARNING: Breaking changes detected' : 'No issues detected';
+            const emoji = hasIssues ? '⚠️' : '✅';
+            const statusText = hasIssues ? 'WARNING: Breaking changes detected' : 'No issues detected';
+            
+            const deployUrl = '${{ needs.deploy.outputs.deployment_url }}';
+            const commitSha = '${{ github.sha }}';
             
             const body = `## 🤖 Deployment Analysis Report
-            
-**Status:** ${status}
-**Deployment URL:** ${{ needs.deploy.outputs.deployment_url }}
+
+**Status:** ${emoji} ${statusText}
+**Deployment URL:** ${deployUrl}
+**Commit:** ${commitSha}
 
 <details>
-<summary>Click to view full analysis</summary>
+<summary>📋 Click to view full analysis</summary>
 
 \`\`\`
 ${report.substring(0, 3000)}
