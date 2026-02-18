@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from baseline import compare_with_baseline, load_baseline
+from quality_checks import check_quality_issues
 
 # Tool implementations
 def check_deployed_site(url: str) -> str:
@@ -200,6 +201,17 @@ tools = [
             'required': ['url'],
         },
     },
+    {
+        'name': 'check_quality_issues',
+        'description': 'Checks for UX, accessibility, and code quality issues like empty buttons, missing labels, etc.',
+        'input_schema': {
+            'type': 'object',
+            'properties': {
+                'url': {'type': 'string', 'description': 'The deployed site URL to check'},
+            },
+            'required': ['url'],
+        },
+    },
 ]
 
 
@@ -214,19 +226,29 @@ def run_agent(user_message: str):
 4. Compare deployments to detect regressions
 5. Provide clear, actionable feedback about deployment health
 
-CRITICAL: For this counter app, you MUST verify these elements exist:
-- Button with id="increment" (REQUIRED)
-- Button with id="decrement" (REQUIRED)
-- Button with id="reset" (REQUIRED)
+CRITICAL: For this counter app, you MUST verify these elements exist AND are properly configured:
+- Button with id="increment" (REQUIRED) - must have visible text
+- Button with id="decrement" (REQUIRED) - must have visible text
+- Button with id="reset" (REQUIRED) - must have visible text
 - Element with id="count" (REQUIRED)
 - JavaScript file (app.js) must be loading
 - CSS file (style.css) must be loading
 
+QUALITY CHECKS you MUST perform:
+- ALL buttons must have text or aria-label (empty buttons are HIGH severity issues)
+- ALL inputs must have associated labels (accessibility requirement)
+- ALL images must have alt text (accessibility requirement)
+- Check for duplicate IDs (critical HTML error)
+- Verify page has a title
+- Check for empty links
+
 When analyzing a deployment:
 - ALWAYS use the compare_deployments tool to check for all critical IDs
+- ALWAYS use the check_quality_issues tool to detect UX/accessibility problems
 - ALWAYS check for the increment, decrement, and reset buttons
 - Verify JavaScript and CSS files are loading
 - Report ANY missing critical elements as BREAKING CHANGES
+- Report ANY quality issues (empty buttons, missing labels, etc.) as HIGH SEVERITY
 - Be specific about what's broken and how it impacts users"""
     
     max_iterations = 10
@@ -277,6 +299,9 @@ When analyzing a deployment:
                 )
             elif tool_use.name == 'check_common_issues':
                 result = check_common_issues(tool_use.input['url'])
+            elif tool_use.name == 'check_quality_issues':
+                quality_result = check_quality_issues(tool_use.input['url'])
+                result = json.dumps(quality_result, indent=2)
             else:
                 result = f"Unknown tool: {tool_use.name}"
             
