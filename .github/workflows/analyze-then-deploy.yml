@@ -1,0 +1,173 @@
+name: Analyze Then Deploy (Safe)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # STEP 1: Analyze BEFORE deploying
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        working-directory: ./agent-python
+        run: pip install -r requirements.txt
+      
+      - name: Run Quality Checks
+        working-directory: ./agent-python
+        run: |
+          # Run quality checks on local files
+          python quality_checks.py
+        env:
+          DEPLOYMENT_URL: "file://${{ github.workspace }}/index.html"
+        continue-on-error: false  # FAIL if quality issues found
+      
+      - name: Static Analysis
+        working-directory: ./agent-python
+        run: |
+          # Check for common issues in the code
+          python -c "
+          from bs4 import BeautifulSoup
+          import sys
+          
+          with open('../index.html', 'r') as f:
+              soup = BeautifulSoup(f.read(), 'html.parser')
+          
+          # Check for empty buttons
+          buttons = soup.find_all('button')
+          empty_buttons = [btn.get('id', 'unknown') for btn in buttons if not btn.get_text(strip=True)]
+          
+          if empty_buttons:
+              print(f'❌ FAIL: Empty buttons found: {empty_buttons}')
+              sys.exit(1)
+          
+          # Check for critical IDs
+          critical_ids = ['count', 'increment', 'decrement', 'reset']
+          missing_ids = [id for id in critical_ids if not soup.find(id=id)]
+          
+          if missing_ids:
+              print(f'❌ FAIL: Missing critical IDs: {missing_ids}')
+              sys.exit(1)
+          
+          print('✅ PASS: All checks passed')
+          "
+      
+      - name: Upload Analysis Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-deployment-analysis
+          path: agent-python/*.txt
+          retention-days: 30
+  
+  # STEP 2: Deploy ONLY if analysis passed
+  deploy:
+    needs: analyze  # Only runs if analyze succeeds
+    runs-on: ubuntu-latest
+    outputs:
+      deployment_url: ${{ steps.get-url.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          exclude_assets: 'agent/**,agent-python/**,node_modules/**,.github/**'
+      
+      - name: Get Deployment URL
+        id: get-url
+        run: |
+          echo "url=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_OUTPUT
+  
+  # STEP 3: Post-deployment verification (optional)
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        working-directory: ./agent-python
+        run: pip install -r requirements.txt
+      
+      - name: Wait for deployment
+        run: sleep 30
+      
+      - name: Verify Live Deployment
+        working-directory: ./agent-python
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}
+        run: python agent.py
+        continue-on-error: true
+      
+      - name: Upload Verification Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-deployment-verification
+          path: agent-python/analysis-report.txt
+          retention-days: 30
+      
+      - name: Comment Results
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let report = 'Verification report not available';
+            try {
+              report = fs.readFileSync('agent-python/analysis-report.txt', 'utf8');
+            } catch (e) {
+              console.log('Could not read report');
+            }
+            
+            const hasIssues = report.includes('ISSUES_DETECTED') || report.includes('Missing');
+            const emoji = hasIssues ? '⚠️' : '✅';
+            const statusText = hasIssues ? 'Issues detected in live deployment' : 'Deployment verified successfully';
+            
+            const deployUrl = '${{ needs.deploy.outputs.deployment_url }}';
+            
+            const body = '## 🤖 Deployment Verification Report\n\n' +
+              'Status: ' + emoji + ' ' + statusText + '\n' +
+              'Deployment URL: ' + deployUrl + '\n\n' +
+              '<details>\n' +
+              '<summary>📋 Click to view full report</summary>\n\n' +
+              '```\n' +
+              report.substring(0, 3000) + '\n' +
+              '```\n\n' +
+              '</details>';
+            
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: body
+            });
