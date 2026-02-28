@@ -142,17 +142,17 @@ jobs:
               const criticalCount = uxIssues.filter(i => i.severity === 'CRITICAL' || i.severity === 'HIGH').length;
               
               analysis = '## 🤖 AI Deployment Analysis\n\n';
-              analysis += `**Status:** ${criticalCount > 0 ? '❌ BLOCKED' : '✅ PASSED'}\n`;
-              analysis += `**Critical/High Issues:** ${criticalCount}\n\n`;
+              analysis += '**Status:** ' + (criticalCount > 0 ? '❌ BLOCKED' : '✅ PASSED') + '\n';
+              analysis += '**Critical/High Issues:** ' + criticalCount + '\n\n';
               
               if (criticalCount > 0) {
                 analysis += '### 🚨 Issues Found:\n\n';
                 uxIssues.forEach(issue => {
                   if (issue.severity === 'CRITICAL' || issue.severity === 'HIGH') {
-                    analysis += `#### ${issue.type} (${issue.severity})\n`;
-                    analysis += `**Issue:** ${issue.issue || issue.message || 'See details'}\n`;
+                    analysis += '#### ' + issue.type + ' (' + issue.severity + ')\n';
+                    analysis += '**Issue:** ' + (issue.issue || issue.message || 'See details') + '\n';
                     if (issue.fix) {
-                      analysis += `**Fix:** ${issue.fix}\n`;
+                      analysis += '**Fix:** ' + issue.fix + '\n';
                     }
                     analysis += '\n';
                   }
@@ -170,7 +170,7 @@ jobs:
               analysis += '\n```\n</details>';
               
             } catch (e) {
-              analysis += `\nError reading report: ${e.message}`;
+              analysis += '\nError reading report: ' + e.message;
             }
             
             // Post as comment on PR or commit
@@ -225,15 +225,13 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `## ⚠️ AI Analysis Override
-            
-**Overridden by:** @${{ github.actor }}
-**Reason:** ${{ github.event.inputs.override_reason }}
-**Commit:** ${{ github.sha }}
-**Time:** ${new Date().toISOString()}
-
-**Warning:** This deployment was blocked by AI analysis but manually overridden.
-Review the AI analysis report for details on the issues.`;
+            const body = '## ⚠️ AI Analysis Override\n\n' +
+              '**Overridden by:** @${{ github.actor }}\n' +
+              '**Reason:** ${{ github.event.inputs.override_reason }}\n' +
+              '**Commit:** ${{ github.sha }}\n' +
+              '**Time:** ' + new Date().toISOString() + '\n\n' +
+              '**Warning:** This deployment was blocked by AI analysis but manually overridden.\n' +
+              'Review the AI analysis report for details on the issues.';
             
             await github.rest.repos.createCommitComment({
               owner: context.repo.owner,
@@ -272,15 +270,14 @@ Review the AI analysis report for details on the issues.`;
             const wasOverridden = '${{ github.event.inputs.override_ai_check }}' === 'true';
             const emoji = wasOverridden ? '⚠️' : '✅';
             const status = wasOverridden ? 'Deployed with override' : 'Deployed successfully';
+            const note = wasOverridden ? '⚠️ **Note:** AI analysis was overridden for this deployment.' : '✅ All AI checks passed.';
             
-            const body = `## ${emoji} Production Deployment
-            
-**Status:** ${status}
-**URL:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
-**Commit:** ${{ github.sha }}
-**Deployed by:** @${{ github.actor }}
-
-${wasOverridden ? '⚠️ **Note:** AI analysis was overridden for this deployment.' : '✅ All AI checks passed.'}`;
+            const body = '## ' + emoji + ' Production Deployment\n\n' +
+              '**Status:** ' + status + '\n' +
+              '**URL:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/\n' +
+              '**Commit:** ${{ github.sha }}\n' +
+              '**Deployed by:** @${{ github.actor }}\n\n' +
+              note;
             
             await github.rest.repos.createCommitComment({
               owner: context.repo.owner,
