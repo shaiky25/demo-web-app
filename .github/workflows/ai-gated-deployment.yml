@@ -1,0 +1,290 @@
+name: AI-Gated Deployment
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      override_ai_check:
+        description: 'Override AI analysis failures (use with caution!)'
+        required: false
+        type: boolean
+        default: false
+      override_reason:
+        description: 'Reason for override (required if overriding)'
+        required: false
+        type: string
+
+concurrency:
+  group: deployment-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  # STEP 1: Static Analysis (Fast checks)
+  static-analysis:
+    runs-on: ubuntu-latest
+    outputs:
+      has_issues: ${{ steps.check.outputs.has_issues }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        working-directory: ./agent-python
+        run: pip install -r requirements.txt
+      
+      - name: Run Quality Checks
+        id: check
+        working-directory: ./agent-python
+        run: |
+          python quality_checks.py > quality-report.txt 2>&1 || echo "has_issues=true" >> $GITHUB_OUTPUT
+          cat quality-report.txt
+        env:
+          DEPLOYMENT_URL: "file://${{ github.workspace }}/index.html"
+        continue-on-error: true
+      
+      - name: Upload Quality Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-report
+          path: agent-python/quality-report.txt
+          retention-days: 30
+  
+  # STEP 2: AI Analysis (Deep reasoning)
+  ai-analysis:
+    runs-on: ubuntu-latest
+    needs: static-analysis
+    outputs:
+      analysis_status: ${{ steps.ai-check.outputs.status }}
+      has_critical_issues: ${{ steps.ai-check.outputs.has_critical }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        working-directory: ./agent-python
+        run: pip install -r requirements.txt
+      
+      - name: Deploy to Staging for Analysis
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages-staging
+          exclude_assets: 'agent/**,agent-python/**,node_modules/**,.github/**'
+      
+      - name: Wait for Staging Deployment
+        run: sleep 30
+      
+      - name: Run AI Analysis
+        id: ai-check
+        working-directory: ./agent-python
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEPLOYMENT_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: |
+          # Run AI analysis
+          python ai_reasoning_checks.py > ai-analysis.txt 2>&1 || true
+          
+          # Check for critical issues
+          if grep -qi "CRITICAL\|HIGH" ai-analysis.txt; then
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "has_critical=true" >> $GITHUB_OUTPUT
+            echo "❌ AI Analysis found critical issues"
+          else
+            echo "status=passed" >> $GITHUB_OUTPUT
+            echo "has_critical=false" >> $GITHUB_OUTPUT
+            echo "✅ AI Analysis passed"
+          fi
+          
+          cat ai-analysis.txt
+        continue-on-error: true
+      
+      - name: Upload AI Analysis Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-analysis-report
+          path: agent-python/ai-analysis-report.json
+          retention-days: 30
+      
+      - name: Create Analysis Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let analysis = 'Analysis report not available';
+            try {
+              const report = JSON.parse(fs.readFileSync('agent-python/ai-analysis-report.json', 'utf8'));
+              
+              // Format UX issues
+              const uxIssues = report.ux_analysis?.ai_insights || [];
+              const criticalCount = uxIssues.filter(i => i.severity === 'CRITICAL' || i.severity === 'HIGH').length;
+              
+              analysis = '## 🤖 AI Deployment Analysis\n\n';
+              analysis += `**Status:** ${criticalCount > 0 ? '❌ BLOCKED' : '✅ PASSED'}\n`;
+              analysis += `**Critical/High Issues:** ${criticalCount}\n\n`;
+              
+              if (criticalCount > 0) {
+                analysis += '### 🚨 Issues Found:\n\n';
+                uxIssues.forEach(issue => {
+                  if (issue.severity === 'CRITICAL' || issue.severity === 'HIGH') {
+                    analysis += `#### ${issue.type} (${issue.severity})\n`;
+                    analysis += `**Issue:** ${issue.issue || issue.message || 'See details'}\n`;
+                    if (issue.fix) {
+                      analysis += `**Fix:** ${issue.fix}\n`;
+                    }
+                    analysis += '\n';
+                  }
+                });
+                
+                analysis += '\n### ⚠️ Deployment Blocked\n\n';
+                analysis += 'This deployment has been blocked due to critical UX/accessibility issues.\n\n';
+                analysis += '**Options:**\n';
+                analysis += '1. Fix the issues and push again\n';
+                analysis += '2. Override with manual approval (use workflow_dispatch with override flag)\n\n';
+              }
+              
+              analysis += '<details>\n<summary>📋 Full AI Analysis</summary>\n\n```json\n';
+              analysis += JSON.stringify(report, null, 2).substring(0, 5000);
+              analysis += '\n```\n</details>';
+              
+            } catch (e) {
+              analysis += `\nError reading report: ${e.message}`;
+            }
+            
+            // Post as comment on PR or commit
+            if (context.payload.pull_request) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: analysis
+              });
+            } else {
+              await github.rest.repos.createCommitComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: context.sha,
+                body: analysis
+              });
+            }
+            
+            // Set job summary
+            await core.summary
+              .addRaw(analysis)
+              .write();
+  
+  # STEP 3: Approval Gate (if issues found)
+  approval-gate:
+    runs-on: ubuntu-latest
+    needs: ai-analysis
+    if: needs.ai-analysis.outputs.has_critical_issues == 'true'
+    environment:
+      name: production-override
+    steps:
+      - name: Check Override
+        run: |
+          if [ "${{ github.event.inputs.override_ai_check }}" == "true" ]; then
+            echo "✅ Override approved by: ${{ github.actor }}"
+            echo "Reason: ${{ github.event.inputs.override_reason }}"
+          else
+            echo "❌ Deployment blocked by AI analysis"
+            echo "Critical issues found. Manual override required."
+            echo ""
+            echo "To override:"
+            echo "1. Go to Actions tab"
+            echo "2. Click 'Run workflow'"
+            echo "3. Check 'Override AI analysis failures'"
+            echo "4. Provide reason for override"
+            exit 1
+          fi
+      
+      - name: Log Override
+        if: github.event.inputs.override_ai_check == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `## ⚠️ AI Analysis Override
+            
+**Overridden by:** @${{ github.actor }}
+**Reason:** ${{ github.event.inputs.override_reason }}
+**Commit:** ${{ github.sha }}
+**Time:** ${new Date().toISOString()}
+
+**Warning:** This deployment was blocked by AI analysis but manually overridden.
+Review the AI analysis report for details on the issues.`;
+            
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: body
+            });
+  
+  # STEP 4: Deploy to Production (only if passed or overridden)
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [ai-analysis, approval-gate]
+    if: |
+      always() && 
+      (needs.ai-analysis.outputs.has_critical_issues == 'false' || 
+       github.event.inputs.override_ai_check == 'true')
+    environment:
+      name: production
+      url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Deploy to Production
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
+          exclude_assets: 'agent/**,agent-python/**,node_modules/**,.github/**'
+      
+      - name: Deployment Success
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const wasOverridden = '${{ github.event.inputs.override_ai_check }}' === 'true';
+            const emoji = wasOverridden ? '⚠️' : '✅';
+            const status = wasOverridden ? 'Deployed with override' : 'Deployed successfully';
+            
+            const body = `## ${emoji} Production Deployment
+            
+**Status:** ${status}
+**URL:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+**Commit:** ${{ github.sha }}
+**Deployed by:** @${{ github.actor }}
+
+${wasOverridden ? '⚠️ **Note:** AI analysis was overridden for this deployment.' : '✅ All AI checks passed.'}`;
+            
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: body
+            });

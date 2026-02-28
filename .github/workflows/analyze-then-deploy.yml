@@ -1,10 +1,8 @@
 name: Analyze Then Deploy (Safe)
 
+# DISABLED: Use ai-gated-deployment.yml instead
+# This workflow is kept for reference only
 on:
-  push:
-    branches:
-      - main
-      - master
   workflow_dispatch:
 
 concurrency:

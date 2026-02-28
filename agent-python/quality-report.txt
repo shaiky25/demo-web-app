@@ -1,0 +1,21 @@
+============================================================
+QUALITY VALIDATION REPORT
+============================================================
+URL: https://shaiky25.github.io/demo-web-app/
+Status: QUALITY_ISSUES_FOUND
+
+SUMMARY:
+  Total Issues: 1
+  Critical: 0
+  High: 1
+  Medium: 0
+  Low: 0
+  Warnings: 0
+
+🟠 HIGH SEVERITY ISSUES:
+  - EMPTY_BUTTON: Button with id="increment" has no text or aria-label
+    Impact: Users cannot see what the button does. Screen readers cannot announce it.
+    Fix: Add text inside the button or add aria-label attribute
+    Example: <button id="increment">Add Text Here</button>
+
+============================================================

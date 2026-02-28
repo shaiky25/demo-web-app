@@ -1,0 +1,108 @@
+name: Staging → Production Flow
+
+# DISABLED: Use ai-gated-deployment.yml instead
+# This workflow is kept for reference only
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # STEP 1: Deploy to staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    outputs:
+      staging_url: ${{ steps.get-url.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Deploy to Staging (gh-pages-staging branch)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages-staging
+          exclude_assets: 'agent/**,agent-python/**,node_modules/**,.github/**'
+      
+      - name: Get Staging URL
+        id: get-url
+        run: |
+          # Staging URL could be a different subdomain or path
+          echo "url=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}-staging/" >> $GITHUB_OUTPUT
+  
+  # STEP 2: Analyze staging deployment
+  analyze-staging:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        working-directory: ./agent-python
+        run: pip install -r requirements.txt
+      
+      - name: Wait for staging deployment
+        run: sleep 30
+      
+      - name: Analyze Staging Deployment
+        working-directory: ./agent-python
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEPLOYMENT_URL: ${{ needs.deploy-staging.outputs.staging_url }}
+        run: |
+          python agent.py
+          # Exit with error if issues found
+          if grep -q "ISSUES_DETECTED" analysis-report.txt; then
+            echo "❌ Staging analysis failed - blocking production deployment"
+            exit 1
+          fi
+      
+      - name: Upload Staging Analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-analysis
+          path: agent-python/analysis-report.txt
+  
+  # STEP 3: Deploy to production ONLY if staging passed
+  deploy-production:
+    needs: analyze-staging
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.get-url.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Deploy to Production (gh-pages branch)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
+          exclude_assets: 'agent/**,agent-python/**,node_modules/**,.github/**'
+      
+      - name: Get Production URL
+        id: get-url
+        run: |
+          echo "url=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_OUTPUT
+      
+      - name: Notify Success
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: '✅ Successfully deployed to production after passing staging analysis!\n\nProduction URL: ${{ steps.get-url.outputs.url }}'
+            });
