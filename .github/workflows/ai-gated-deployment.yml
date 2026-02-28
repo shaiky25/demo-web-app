@@ -9,17 +9,6 @@ on:
     branches:
       - main
       - master
-  workflow_dispatch:
-    inputs:
-      override_ai_check:
-        description: 'Override AI analysis failures (use with caution!)'
-        required: false
-        type: boolean
-        default: false
-      override_reason:
-        description: 'Reason for override (required if overriding)'
-        required: false
-        type: string
 
 concurrency:
   group: deployment-${{ github.ref }}
@@ -195,59 +184,192 @@ jobs:
               .addRaw(analysis)
               .write();
   
-  # STEP 3: Approval Gate (if issues found)
-  approval-gate:
+  # STEP 3: Create Issue for Approval (if issues found)
+  create-approval-issue:
     runs-on: ubuntu-latest
     needs: ai-analysis
     if: needs.ai-analysis.outputs.has_critical_issues == 'true'
-    environment:
-      name: production-override
+    outputs:
+      issue_number: ${{ steps.create-issue.outputs.issue_number }}
     steps:
-      - name: Check Override
-        run: |
-          if [ "${{ github.event.inputs.override_ai_check }}" == "true" ]; then
-            echo "✅ Override approved by: ${{ github.actor }}"
-            echo "Reason: ${{ github.event.inputs.override_reason }}"
-          else
-            echo "❌ Deployment blocked by AI analysis"
-            echo "Critical issues found. Manual override required."
-            echo ""
-            echo "To override:"
-            echo "1. Go to Actions tab"
-            echo "2. Click 'Run workflow'"
-            echo "3. Check 'Override AI analysis failures'"
-            echo "4. Provide reason for override"
-            exit 1
-          fi
+      - name: Checkout
+        uses: actions/checkout@v3
       
-      - name: Log Override
-        if: github.event.inputs.override_ai_check == 'true'
+      - name: Download AI Analysis Report
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-analysis-report
+          path: agent-python/
+      
+      - name: Create Approval Issue
+        id: create-issue
         uses: actions/github-script@v7
         with:
           script: |
-            const body = '## ⚠️ AI Analysis Override\n\n' +
-              '**Overridden by:** @${{ github.actor }}\n' +
-              '**Reason:** ${{ github.event.inputs.override_reason }}\n' +
-              '**Commit:** ${{ github.sha }}\n' +
-              '**Time:** ' + new Date().toISOString() + '\n\n' +
-              '**Warning:** This deployment was blocked by AI analysis but manually overridden.\n' +
-              'Review the AI analysis report for details on the issues.';
+            const fs = require('fs');
+            let issueBody = '## 🚨 Deployment Blocked by AI Analysis\n\n';
+            issueBody += '**Commit:** ${{ github.sha }}\n';
+            issueBody += '**Branch:** ${{ github.ref_name }}\n';
+            issueBody += '**Author:** @${{ github.actor }}\n';
+            issueBody += '**Time:** ' + new Date().toISOString() + '\n\n';
+            issueBody += '---\n\n';
             
+            try {
+              const report = JSON.parse(fs.readFileSync('agent-python/ai-analysis-report.json', 'utf8'));
+              const uxIssues = report.ux_analysis?.ai_insights || [];
+              const criticalIssues = uxIssues.filter(i => i.severity === 'CRITICAL' || i.severity === 'HIGH');
+              
+              issueBody += '### 🔍 Issues Found (' + criticalIssues.length + ')\n\n';
+              
+              criticalIssues.forEach((issue, index) => {
+                issueBody += '#### ' + (index + 1) + '. ' + issue.type + ' (' + issue.severity + ')\n\n';
+                issueBody += '**Problem:** ' + (issue.issue || issue.message || 'See details') + '\n\n';
+                if (issue.fix) {
+                  issueBody += '**Suggested Fix:** ' + issue.fix + '\n\n';
+                }
+                if (issue.user_impact) {
+                  issueBody += '**User Impact:** ' + issue.user_impact + '\n\n';
+                }
+                issueBody += '---\n\n';
+              });
+            } catch (e) {
+              issueBody += '**Error loading detailed report:** ' + e.message + '\n\n';
+            }
+            
+            issueBody += '## 🎯 What Should You Do?\n\n';
+            issueBody += '### Option 1: Fix the Issues (Recommended)\n\n';
+            issueBody += '1. Review the issues above\n';
+            issueBody += '2. Fix them in your code\n';
+            issueBody += '3. Commit and push\n';
+            issueBody += '4. This issue will be closed automatically\n\n';
+            issueBody += '### Option 2: Override and Deploy Anyway\n\n';
+            issueBody += '⚠️ **Use this only if:**\n';
+            issueBody += '- The AI analysis is incorrect (false positive)\n';
+            issueBody += '- You have a valid reason to proceed\n';
+            issueBody += '- This is a time-critical hotfix\n\n';
+            issueBody += '**To override:**\n';
+            issueBody += '1. Review the issues carefully\n';
+            issueBody += '2. Comment on this issue with: `approve: [your reason]`\n';
+            issueBody += '3. Example: `approve: False positive - buttons are in different sections with clear context`\n';
+            issueBody += '4. Deployment will proceed automatically\n\n';
+            issueBody += '---\n\n';
+            issueBody += '**Commit SHA:** `${{ github.sha }}`\n';
+            issueBody += '**Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}';
+            
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Deployment Blocked: AI Analysis Failed for ' + '${{ github.sha }}'.substring(0, 7),
+              body: issueBody,
+              labels: ['deployment-blocked', 'ai-analysis', 'needs-review']
+            });
+            
+            core.setOutput('issue_number', issue.data.number);
+            
+            // Also post comment on commit
             await github.rest.repos.createCommitComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               commit_sha: context.sha,
-              body: body
+              body: '🚨 **Deployment Blocked**\n\nAI analysis found critical issues. See issue #' + issue.data.number + ' for details and approval options.'
             });
+            
+            return issue.data.number;
   
-  # STEP 4: Deploy to Production (only if passed or overridden)
+  # STEP 4: Wait for Approval
+  wait-for-approval:
+    runs-on: ubuntu-latest
+    needs: create-approval-issue
+    outputs:
+      approved: ${{ steps.check-approval.outputs.approved }}
+      approval_reason: ${{ steps.check-approval.outputs.reason }}
+    steps:
+      - name: Wait and Check for Approval
+        id: check-approval
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = ${{ needs.create-approval-issue.outputs.issue_number }};
+            const maxWaitMinutes = 60; // Wait up to 1 hour
+            const checkIntervalSeconds = 30;
+            const maxChecks = (maxWaitMinutes * 60) / checkIntervalSeconds;
+            
+            console.log('Waiting for approval on issue #' + issueNumber);
+            console.log('Will check every ' + checkIntervalSeconds + ' seconds for up to ' + maxWaitMinutes + ' minutes');
+            
+            for (let i = 0; i < maxChecks; i++) {
+              // Get all comments on the issue
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+              
+              // Check if any comment contains "approve:"
+              for (const comment of comments.data) {
+                const body = comment.body.toLowerCase();
+                if (body.includes('approve:')) {
+                  // Extract reason after "approve:"
+                  const match = comment.body.match(/approve:\s*(.+)/i);
+                  const reason = match ? match[1].trim() : 'No reason provided';
+                  
+                  console.log('✅ Approval found!');
+                  console.log('Approved by: @' + comment.user.login);
+                  console.log('Reason: ' + reason);
+                  
+                  core.setOutput('approved', 'true');
+                  core.setOutput('reason', reason);
+                  core.setOutput('approved_by', comment.user.login);
+                  
+                  // Close the issue
+                  await github.rest.issues.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    state: 'closed',
+                    labels: ['deployment-blocked', 'ai-analysis', 'approved-override']
+                  });
+                  
+                  // Add comment confirming approval
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    body: '✅ **Deployment Approved**\n\nApproved by: @' + comment.user.login + '\nReason: ' + reason + '\n\nProceeding with deployment...'
+                  });
+                  
+                  return true;
+                }
+              }
+              
+              // Wait before next check
+              if (i < maxChecks - 1) {
+                console.log('Check ' + (i + 1) + '/' + maxChecks + ': No approval yet, waiting...');
+                await new Promise(resolve => setTimeout(resolve, checkIntervalSeconds * 1000));
+              }
+            }
+            
+            // Timeout reached
+            console.log('❌ Timeout: No approval received within ' + maxWaitMinutes + ' minutes');
+            core.setOutput('approved', 'false');
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: '⏱️ **Approval Timeout**\n\nNo approval received within ' + maxWaitMinutes + ' minutes. Deployment cancelled.\n\nTo deploy, either:\n1. Fix the issues and push again\n2. Comment `approve: [reason]` and re-run the workflow'
+            });
+            
+            return false;
+  
+  # STEP 5: Deploy to Production (only if passed or approved)
   deploy-production:
     runs-on: ubuntu-latest
-    needs: [ai-analysis, approval-gate]
+    needs: [ai-analysis, wait-for-approval]
     if: |
       always() && 
       (needs.ai-analysis.outputs.has_critical_issues == 'false' || 
-       github.event.inputs.override_ai_check == 'true')
+       needs.wait-for-approval.outputs.approved == 'true')
     environment:
       name: production
       url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
@@ -267,17 +389,23 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const wasOverridden = '${{ github.event.inputs.override_ai_check }}' === 'true';
+            const wasOverridden = needs.wait-for-approval.outputs.approved === 'true';
             const emoji = wasOverridden ? '⚠️' : '✅';
             const status = wasOverridden ? 'Deployed with override' : 'Deployed successfully';
-            const note = wasOverridden ? '⚠️ **Note:** AI analysis was overridden for this deployment.' : '✅ All AI checks passed.';
             
-            const body = '## ' + emoji + ' Production Deployment\n\n' +
+            let body = '## ' + emoji + ' Production Deployment\n\n' +
               '**Status:** ' + status + '\n' +
               '**URL:** https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/\n' +
               '**Commit:** ${{ github.sha }}\n' +
-              '**Deployed by:** @${{ github.actor }}\n\n' +
-              note;
+              '**Deployed by:** @${{ github.actor }}\n\n';
+            
+            if (wasOverridden) {
+              const reason = '${{ needs.wait-for-approval.outputs.approval_reason }}';
+              body += '⚠️ **Note:** AI analysis was overridden for this deployment.\n';
+              body += '**Override Reason:** ' + reason + '\n';
+            } else {
+              body += '✅ All AI checks passed.\n';
+            }
             
             await github.rest.repos.createCommitComment({
               owner: context.repo.owner,

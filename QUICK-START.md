@@ -92,17 +92,17 @@ git push
 
 Check Actions tab - should see deployment blocked with reasoning.
 
-### Test 2: Override the Block
+### Test 2: Approve Override via Issue
 
 ```
-1. Go to Actions → AI-Gated Deployment
-2. Click "Run workflow"
-3. Check "Override AI analysis failures"
-4. Reason: "Testing override mechanism"
-5. Click "Run workflow"
+1. Go to Issues tab
+2. Find the auto-created issue
+3. Comment: approve: Testing override mechanism
+4. Wait ~30 seconds
+5. Deployment proceeds
 ```
 
-Should deploy with warning.
+Should deploy with warning and issue closes.
 
 ### Test 3: Fix and Deploy Clean
 

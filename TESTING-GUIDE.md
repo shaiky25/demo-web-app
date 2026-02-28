@@ -50,20 +50,21 @@ git push
 If AI blocks deployment (as expected):
 
 ```
-1. Go to Actions tab
-2. Click "AI-Gated Deployment" workflow
-3. Click "Run workflow" button
-4. Fill in:
-   ✅ Override AI analysis failures: checked
-   📝 Reason: "Testing override mechanism - will fix in next commit"
-5. Click "Run workflow"
+1. Go to Issues tab
+2. Find the issue titled "🚨 Deployment Blocked: AI Analysis Failed for..."
+3. Review the detailed issue description
+4. Add a comment: approve: Testing override mechanism - will fix in next commit
+5. Wait ~30 seconds
+6. Deployment proceeds automatically
+7. Issue closes with approval logged
 ```
 
 **Expected Result:**
-- Workflow runs again
-- AI analysis still fails
-- Approval gate passes (override)
+- Workflow runs again (or continues if still running)
+- AI analysis still shows issues
+- Approval detected from issue comment
 - Deploys to production with warning
+- Issue closed with approval logged
 - Comment posted documenting override
 
 ### Test 3: Fix Issues and Deploy Clean

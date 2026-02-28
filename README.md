@@ -86,17 +86,22 @@ The AI-gated deployment will run automatically!
     │         │
     ↓         ↓
 ┌───────┐  ┌──────────┐
-│ BLOCK │  │  DEPLOY  │
-└───┬───┘  └──────────┘
+│CREATE │  │  DEPLOY  │
+│ISSUE  │  └──────────┘
+└───┬───┘
     │
     ↓
 ┌───────────────┐
-│ Need Override?│
+│ Wait for      │
+│ Comment       │
+│ "approve:"    │
 └───┬───────────┘
     │
     ↓
 ┌───────────────┐
-│ Manual Approve│
+│ Comment with  │
+│ approve:      │
+│ [reason]      │
 └───┬───────────┘
     │
     ↓
@@ -146,6 +151,7 @@ Functionality matches button text
 ### Quick Start
 - **[QUICK-START.md](QUICK-START.md)** - Get running in 5 minutes
 - **[SYSTEM-OVERVIEW.md](SYSTEM-OVERVIEW.md)** - Complete architecture diagram
+- **[ISSUE-BASED-APPROVAL-GUIDE.md](ISSUE-BASED-APPROVAL-GUIDE.md)** - How to approve deployments via issues
 
 ### Getting Started
 - **[TESTING-GUIDE.md](TESTING-GUIDE.md)** - How to test the AI-gated deployment
@@ -233,15 +239,15 @@ See [WORKFLOW-COMPARISON.md](WORKFLOW-COMPARISON.md) for details.
 If AI blocks deployment but you disagree:
 
 ```
-1. Go to Actions tab
-2. Click "AI-Gated Deployment"
-3. Click "Run workflow"
-4. Check "Override AI analysis failures"
-5. Enter reason: "False positive - buttons are in separate sections"
-6. Click "Run workflow"
+1. A GitHub issue is automatically created
+2. Review the issue details (shows all problems found)
+3. Comment on the issue: approve: [your reason]
+4. Example: approve: False positive - buttons are in separate sections
+5. Deployment proceeds automatically
+6. Issue is closed with approval logged
 ```
 
-All overrides are logged and tracked.
+All approvals are tracked in the issue history.
 
 ## What Makes This Special
 
