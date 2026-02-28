@@ -289,78 +289,71 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const issueNumber = ${{ needs.create-approval-issue.outputs.issue_number }};
-            const maxWaitMinutes = 60; // Wait up to 1 hour
-            const checkIntervalSeconds = 30;
-            const maxChecks = (maxWaitMinutes * 60) / checkIntervalSeconds;
-            
-            console.log('Waiting for approval on issue #' + issueNumber);
-            console.log('Will check every ' + checkIntervalSeconds + ' seconds for up to ' + maxWaitMinutes + ' minutes');
-            
-            for (let i = 0; i < maxChecks; i++) {
-              // Get all comments on the issue
-              const comments = await github.rest.issues.listComments({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber
-              });
+            (async () => {
+              const issueNumber = ${{ needs.create-approval-issue.outputs.issue_number }};
+              const maxWaitMinutes = 60;
+              const checkIntervalSeconds = 30;
+              const maxChecks = (maxWaitMinutes * 60) / checkIntervalSeconds;
               
-              // Check if any comment contains "approve:"
-              for (const comment of comments.data) {
-                const body = comment.body.toLowerCase();
-                if (body.includes('approve:')) {
-                  // Extract reason after "approve:"
-                  const match = comment.body.match(/approve:\s*(.+)/i);
-                  const reason = match ? match[1].trim() : 'No reason provided';
-                  
-                  console.log('✅ Approval found!');
-                  console.log('Approved by: @' + comment.user.login);
-                  console.log('Reason: ' + reason);
-                  
-                  core.setOutput('approved', 'true');
-                  core.setOutput('reason', reason);
-                  core.setOutput('approved_by', comment.user.login);
-                  
-                  // Close the issue
-                  await github.rest.issues.update({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: issueNumber,
-                    state: 'closed',
-                    labels: ['deployment-blocked', 'ai-analysis', 'approved-override']
-                  });
-                  
-                  // Add comment confirming approval
-                  await github.rest.issues.createComment({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: issueNumber,
-                    body: '✅ **Deployment Approved**\n\nApproved by: @' + comment.user.login + '\nReason: ' + reason + '\n\nProceeding with deployment...'
-                  });
-                  
-                  return true;
+              console.log('Waiting for approval on issue #' + issueNumber);
+              console.log('Will check every ' + checkIntervalSeconds + ' seconds for up to ' + maxWaitMinutes + ' minutes');
+              
+              for (let i = 0; i < maxChecks; i++) {
+                const comments = await github.rest.issues.listComments({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber
+                });
+                
+                for (const comment of comments.data) {
+                  const body = comment.body.toLowerCase();
+                  if (body.includes('approve:')) {
+                    const match = comment.body.match(/approve:\s*(.+)/i);
+                    const reason = match ? match[1].trim() : 'No reason provided';
+                    
+                    console.log('✅ Approval found!');
+                    console.log('Approved by: @' + comment.user.login);
+                    console.log('Reason: ' + reason);
+                    
+                    core.setOutput('approved', 'true');
+                    core.setOutput('reason', reason);
+                    core.setOutput('approved_by', comment.user.login);
+                    
+                    await github.rest.issues.update({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issueNumber,
+                      state: 'closed',
+                      labels: ['deployment-blocked', 'ai-analysis', 'approved-override']
+                    });
+                    
+                    await github.rest.issues.createComment({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issueNumber,
+                      body: '✅ **Deployment Approved**\n\nApproved by: @' + comment.user.login + '\nReason: ' + reason + '\n\nProceeding with deployment...'
+                    });
+                    
+                    return;
+                  }
+                }
+                
+                if (i < maxChecks - 1) {
+                  console.log('Check ' + (i + 1) + '/' + maxChecks + ': No approval yet, waiting...');
+                  await new Promise(resolve => setTimeout(resolve, checkIntervalSeconds * 1000));
                 }
               }
               
-              // Wait before next check
-              if (i < maxChecks - 1) {
-                console.log('Check ' + (i + 1) + '/' + maxChecks + ': No approval yet, waiting...');
-                await new Promise(resolve => setTimeout(resolve, checkIntervalSeconds * 1000));
-              }
-            }
-            
-            // Timeout reached
-            console.log('❌ Timeout: No approval received within ' + maxWaitMinutes + ' minutes');
-            core.setOutput('approved', 'false');
-            
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-              body: '⏱️ **Approval Timeout**\n\nNo approval received within ' + maxWaitMinutes + ' minutes. Deployment cancelled.\n\nTo deploy, either:\n1. Fix the issues and push again\n2. Comment `approve: [reason]` and re-run the workflow'
-            });
-            
-            return false;
+              console.log('❌ Timeout: No approval received within ' + maxWaitMinutes + ' minutes');
+              core.setOutput('approved', 'false');
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: '⏱️ **Approval Timeout**\n\nNo approval received within ' + maxWaitMinutes + ' minutes. Deployment cancelled.\n\nTo deploy, either:\n1. Fix the issues and push again\n2. Comment `approve: [reason]` and re-run the workflow'
+              });
+            })();
   
   # STEP 5: Deploy to Production (only if passed or approved)
   deploy-production:
