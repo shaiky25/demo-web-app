@@ -1,0 +1,168 @@
+feat: Replace workflow_dispatch with issue-based approval system
+
+BREAKING CHANGE: Override mechanism changed from manual workflow dispatch to automatic GitHub issue creation
+
+## What Changed
+
+### Before
+- Deployment blocked → Go to Actions → Run workflow → Fill form → Deploy
+- Required production-override environment
+- Manual process with multiple steps
+- Hard to track approvals
+
+### After  
+- Deployment blocked → Issue auto-created → Comment "approve: reason" → Deploy
+- Automatic issue creation with full context
+- Simple comment-based approval
+- Complete audit trail in issues
+
+## New Features
+
+1. **Automatic Issue Creation**
+   - Creates GitHub issue when deployment blocked
+   - Includes all AI analysis details
+   - Labels: deployment-blocked, ai-analysis, needs-review
+   - Links to commit and workflow run
+
+2. **Comment-Based Approval**
+   - Just comment: `approve: [your reason]`
+   - Workflow checks every 30 seconds
+   - Deploys automatically when approved
+   - Issue closes with approval logged
+
+3. **Team Collaboration**
+   - Discuss issues in comments
+   - Multiple team members can review
+   - Visible decision-making process
+   - Searchable approval history
+
+4. **Timeout Protection**
+   - Waits 60 minutes for approval
+   - Fails gracefully if no approval
+   - Can re-run after commenting
+
+5. **Complete Audit Trail**
+   - All approvals in issue history
+   - Permanent record of decisions
+   - Searchable and filterable
+   - Linked to specific commits
+
+## Technical Changes
+
+### Workflow Changes
+- Removed workflow_dispatch inputs
+- Added create-approval-issue job
+- Added wait-for-approval job with polling
+- Updated deploy-production dependencies
+- Fixed YAML syntax (template literals → string concatenation)
+
+### New Jobs
+1. `create-approval-issue` - Creates GitHub issue with details
+2. `wait-for-approval` - Polls for approval comment (60 min timeout)
+3. `deploy-production` - Deploys if passed or approved
+
+### Removed
+- workflow_dispatch trigger inputs
+- production-override environment requirement
+- Manual approval gate
+
+## Documentation
+
+### New Guides
+- ISSUE-BASED-APPROVAL-GUIDE.md - Complete approval system guide
+- WHATS-NEW.md - Migration and benefits guide
+
+### Updated Guides
+- README.md - Updated workflow diagram and override section
+- TESTING-GUIDE.md - Updated test scenarios
+- QUICK-START.md - Updated setup and testing steps
+
+## Benefits
+
+### For Developers
+✅ Simpler approval (just comment)
+✅ All context in one place
+✅ No form filling
+✅ Faster process
+
+### For Teams
+✅ Better collaboration
+✅ Visible decisions
+✅ Easy tracking
+✅ Searchable history
+
+### For Compliance
+✅ Permanent audit trail
+✅ Who, when, why logged
+✅ Linked to issues
+✅ Timestamped records
+
+## Migration
+
+### No Breaking Changes for Users
+- Same API key requirement
+- Same GitHub Pages setup
+- Same AI analysis process
+
+### What's Removed
+- production-override environment (no longer needed)
+- Manual workflow dispatch (replaced with issues)
+
+### What to Update
+- Team documentation
+- Training materials
+- Remove workflow_dispatch references
+
+## Usage
+
+### When Deployment Blocked
+
+1. Issue automatically created
+2. Review issue details
+3. Comment: `approve: [your reason]`
+4. Deployment proceeds automatically
+
+### Example Approval
+```
+approve: False positive - buttons are in separate sections with clear context
+```
+
+### Finding Issues
+- All blocks: `label:deployment-blocked`
+- Approved: `label:approved-override is:closed`
+- Recent: `label:deployment-blocked is:open`
+
+## Testing
+
+Push code with issues to test:
+1. AI blocks deployment
+2. Issue created automatically
+3. Comment to approve
+4. Deployment proceeds
+5. Issue closes
+
+## Files Changed
+
+Modified:
+- .github/workflows/ai-gated-deployment.yml (issue-based approval)
+- README.md (updated workflow and override docs)
+- TESTING-GUIDE.md (updated test scenarios)
+- QUICK-START.md (updated setup steps)
+
+Added:
+- ISSUE-BASED-APPROVAL-GUIDE.md (complete guide)
+- WHATS-NEW.md (migration guide)
+
+## Validation
+
+✅ YAML syntax validated
+✅ Workflow structure verified
+✅ Documentation updated
+✅ Examples provided
+✅ Migration guide created
+
+---
+
+This change significantly improves the developer experience by making
+deployment approval as simple as commenting on an automatically created
+GitHub issue, while providing better tracking and team collaboration.
